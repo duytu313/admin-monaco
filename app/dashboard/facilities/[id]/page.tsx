@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -40,6 +40,9 @@ interface Room {
   currentCustomer?: string;
 }
 
+// Danh sách trạng thái booking chiếm phòng
+const OCCUPYING_STATUSES = ['Đang dùng', 'Đã đến', 'Chờ đến', 'Đã xác nhận', 'Chờ thanh toán'];
+
 const facilityTypeLabels: Record<string, string> = {
   karaoke: 'Karaoke',
   massage: 'Massage',
@@ -59,6 +62,7 @@ export default function FacilityDetailPage() {
 
   const [facility, setFacility] = useState<FacilityData | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [allBookings, setAllBookings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -81,6 +85,7 @@ export default function FacilityDetailPage() {
           name: data.name || '',
           type: data.type || 'karaoke',
         });
+        setLoading(false);
       } else {
         setErrorMsg('Không tìm thấy cơ sở này.');
         setLoading(false);
@@ -93,7 +98,7 @@ export default function FacilityDetailPage() {
 
     // Fetch rooms under this facility
     const roomsRef = ref(db, `facilities/${facilityId}/rooms`);
-    const unsubscribe = onValue(roomsRef, (snapshot) => {
+    const unsubRooms = onValue(roomsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
         const list = Object.entries(data).map(([key, value]: [string, any]) => ({
@@ -117,8 +122,51 @@ export default function FacilityDetailPage() {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    // Listen to all bookings to sync room status
+    const bookingsRef = ref(db, 'bookings');
+    const unsubBookings = onValue(bookingsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const list = Object.entries(data).map(([id, value]: [string, any]) => ({
+          id,
+          ...value,
+        }));
+        setAllBookings(list);
+      } else {
+        setAllBookings([]);
+      }
+    });
+
+    return () => {
+      unsubRooms();
+      unsubBookings();
+    };
   }, [facilityId]);
+
+  // Tính trạng thái phòng dựa trên booking thực tế
+  const syncedRooms = useMemo(() => {
+    return rooms.map((room) => {
+      // Tìm booking đang active cho phòng này
+      const activeBooking = allBookings.find((b) => {
+        if (b.status === 'Đã hủy' || b.status === 'Đã thanh toán') return false;
+        const roomName = b.room || b.roomName || '';
+        return roomName === room.name || roomName === room.id;
+      });
+
+      if (activeBooking) {
+        return {
+          ...room,
+          status: 'Occupied' as const,
+          currentCustomer: activeBooking.name || activeBooking.customerName || 'Đã đặt',
+        };
+      }
+      return {
+        ...room,
+        status: 'Available' as const,
+        currentCustomer: '',
+      };
+    });
+  }, [rooms, allBookings]);
 
   const getRoomLabel = () => {
     if (!facility) return 'phòng';
@@ -224,7 +272,7 @@ export default function FacilityDetailPage() {
             <div>
               <h1 className="text-2xl font-bold text-white">{facility?.name}</h1>
               <p className="text-slate-400 text-sm">
-                {facility?.type ? facilityTypeLabels[facility.type] : ''} - {rooms.length} {roomLabelPlural}
+                {facility?.type ? facilityTypeLabels[facility.type] : ''} - {rooms.length} {roomLabelPlural} ({syncedRooms.filter(r => r.status === 'Occupied').length} đang dùng)
               </p>
             </div>
           </div>
@@ -263,7 +311,7 @@ export default function FacilityDetailPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              rooms.map((room) => (
+              syncedRooms.map((room) => (
                 <TableRow key={room.id} className="border-slate-700 hover:bg-slate-700/50">
                   <TableCell className="text-slate-300 font-medium">{room.id}</TableCell>
                   <TableCell className="text-slate-300 font-semibold">{room.name}</TableCell>

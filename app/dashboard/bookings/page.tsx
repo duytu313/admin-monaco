@@ -14,65 +14,107 @@ import { Badge } from '@/components/ui/badge';
 import { db } from '@/lib/firebase-config';
 import { ref, onValue, update } from 'firebase/database';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
-import { CalendarIcon } from 'lucide-react';
+import { CalendarIcon, BarChart3, Mic, Heart, Soup } from 'lucide-react';
 
 const getStatusColor = (status: string) => {
-  switch (status) {
-    case 'Đã hoàn thành':
-      return 'bg-green-500/20 text-green-400';
-    case 'Đang diễn ra':
-      return 'bg-blue-500/20 text-blue-400';
-    case 'Đã đặt':
-      return 'bg-yellow-500/20 text-yellow-400';
-    default:
-      return 'bg-slate-500/20 text-slate-400';
+  const s = (status || '').toLowerCase();
+  // Hoàn thành / Đã thanh toán
+  if (s === 'đã hoàn thành' || s === 'đã thanh toán' || s === 'completed' || s === 'paid')
+    return 'bg-green-500/20 text-green-400 border-green-500/30';
+  // Đang diễn ra / Đang dùng
+  if (s === 'đang diễn ra' || s === 'đang dùng' || s === 'ongoing')
+    return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+  // Đã đặt
+  if (s === 'đã đặt' || s === 'booked')
+    return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+  // Đã xác nhận / confirmed
+  if (s === 'đã xác nhận' || s === 'confirmed')
+    return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+  // Chưa xác nhận / Chờ xác nhận / pending
+  if (s === 'chưa xác nhận' || s === 'chờ xác nhận' || s === 'pending' || s === 'chờ xử lý')
+    return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
+  // Đã huỷ / cancelled
+  if (s === 'đã huỷ' || s === 'đã hủy' || s === 'cancelled')
+    return 'bg-red-500/20 text-red-400 border-red-500/30';
+  // Mặc định
+  return 'bg-slate-500/20 text-slate-400 border-slate-500/30';
+};
+
+const getServiceIcon = (type: string) => {
+  switch (type) {
+    case 'karaoke': return <Mic size={14} />;
+    case 'massage': return <Heart size={14} />;
+    case 'restaurant': return <Soup size={14} />;
+    default: return null;
   }
 };
 
-const hours = Array.from({ length: 14 }, (_, i) => i + 10); // 10:00 to 23:00
-
-// Helper để tính toán vị trí trên lịch
-const getBookingStyle = (timeStr: string) => {
-  try {
-    const [start, end] = timeStr.split(' - ');
-    const startHour = parseInt(start.split(':')[0]) + parseInt(start.split(':')[1]) / 60;
-    const endHour = parseInt(end.split(':')[0]) + parseInt(end.split(':')[1]) / 60;
-
-    const top = (startHour - 10) * 80; // Mỗi tiếng cao 80px
-    const height = (endHour - startHour) * 80;
-    return { top: `${top}px`, height: `${height}px` };
-  } catch (e) {
-    return { top: '0px', height: '0px', display: 'none' };
+const getServiceColor = (type: string) => {
+  switch (type) {
+    case 'karaoke': return 'text-purple-400 bg-purple-500/10 border-purple-500/30';
+    case 'massage': return 'text-pink-400 bg-pink-500/10 border-pink-500/30';
+    case 'restaurant': return 'text-orange-400 bg-orange-500/10 border-orange-500/30';
+    default: return 'text-slate-400 bg-slate-500/10 border-slate-500/30';
   }
 };
 
 export default function BookingsPage() {
   const [bookingList, setBookingList] = useState<any[]>([]);
-  const [rooms, setRooms] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Mặc định chọn ngày hôm nay
-  const [selectedDate, setSelectedDate] = useState(() => {
+  // Date range filter
+  const [startDate, setStartDate] = useState(() => {
     const today = new Date();
-    // format yyyy-mm-dd
-    return today.toISOString().split('T')[0];
+    return today.toISOString().split('T')[0]; // hôm nay
+  });
+  const [endDate, setEndDate] = useState(() => {
+    const weekLater = new Date();
+    weekLater.setDate(weekLater.getDate() + 7);
+    return weekLater.toISOString().split('T')[0]; // 7 ngày sau
   });
 
-  // Lọc ra các booking của ngày được chọn
+  // Lọc ra các booking trong khoảng ngày được chọn
   const filteredBookings = bookingList.filter(b => {
-    if (!b.bookingDate) return true; // Nếu dữ liệu cũ không có ngày thì vẫn hiện để không bị mất
-    const [y, m, d] = selectedDate.split('-');
-    const format1 = selectedDate; // yyyy-mm-dd
-    const format2 = `${d}/${m}/${y}`; // dd/mm/yyyy
-    return b.bookingDate === format1 || b.bookingDate === format2 || b.bookingDate.includes(format2);
+    if (!b.bookingDate) return true;
+    // Chuyển đổi bookingDate thành Date để so sánh
+    const parts = b.bookingDate.split('/');
+    let bookingDateObj: Date;
+    if (parts.length === 3) {
+      // dd/mm/yyyy
+      bookingDateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+    } else {
+      bookingDateObj = new Date(b.bookingDate + 'T00:00:00');
+    }
+    const start = new Date(startDate + 'T00:00:00');
+    const end = new Date(endDate + 'T23:59:59');
+    return bookingDateObj >= start && bookingDateObj <= end;
   });
+
+  // Helper để chuẩn hóa trạng thái
+  const normalizeStatus = (status: string): string => {
+    const s = (status || '').toLowerCase();
+    if (s === 'đã hoàn thành' || s === 'completed' || s === 'đã thanh toán' || s === 'paid') return 'completed';
+    if (s === 'đang diễn ra' || s === 'ongoing' || s === 'đang dùng') return 'ongoing';
+    if (s === 'đã đặt' || s === 'booked') return 'booked';
+    if (s === 'đã xác nhận' || s === 'confirmed') return 'confirmed';
+    if (s === 'chưa xác nhận' || s === 'chờ xác nhận' || s === 'pending' || s === 'chờ xử lý') return 'pending';
+    if (s === 'đã huỷ' || s === 'đã hủy' || s === 'cancelled') return 'cancelled';
+    return 'other';
+  };
+
+  // Thống kê theo khoảng thời gian
+  const stats = {
+    total: filteredBookings.length,
+    pending: filteredBookings.filter(b => normalizeStatus(b.status) === 'pending').length,
+    confirmed: filteredBookings.filter(b => normalizeStatus(b.status) === 'confirmed' || normalizeStatus(b.status) === 'booked').length,
+    ongoing: filteredBookings.filter(b => normalizeStatus(b.status) === 'ongoing').length,
+    completed: filteredBookings.filter(b => normalizeStatus(b.status) === 'completed').length,
+    cancelled: filteredBookings.filter(b => normalizeStatus(b.status) === 'cancelled').length,
+  };
 
   useEffect(() => {
     const bookingsRef = ref(db, 'bookings');
-    const roomsRef = ref(db, 'rooms');
-
     const unsubBookings = onValue(bookingsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
@@ -80,28 +122,13 @@ export default function BookingsPage() {
           id,
           ...value
         }));
-        setBookingList(list.reverse()); // Hiển thị mới nhất lên đầu
+        setBookingList(list.reverse());
       } else {
         setBookingList([]);
       }
       setLoading(false);
     });
-
-    const unsubRooms = onValue(roomsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const list = Object.entries(data).map(([id, value]: [string, any]) => ({
-          id,
-          ...value
-        }));
-        setRooms(list);
-      }
-    });
-
-    return () => {
-      unsubBookings();
-      unsubRooms();
-    };
+    return () => unsubBookings();
   }, []);
 
   const handleStatusChange = (bookingId: string, newStatus: string) => {
@@ -116,140 +143,140 @@ export default function BookingsPage() {
         <p className="text-slate-400 mt-2">Xem và quản lý tất cả đơn đặt phòng</p>
       </div>
 
-      <Tabs defaultValue="list" className="w-full">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
-          <TabsList className="bg-slate-800 border border-slate-700">
-            <TabsTrigger value="list" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400">Danh sách</TabsTrigger>
-            <TabsTrigger value="calendar" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400">Lịch theo giờ</TabsTrigger>
-          </TabsList>
-
-          <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-md px-3 py-1">
-            <CalendarIcon className="w-4 h-4 text-slate-400" />
-            <input 
-              type="date" 
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent text-slate-300 text-sm outline-none border-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:invert"
-            />
+      {/* Date Range Filter */}
+      <Card className="bg-slate-800 border-slate-700 p-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="flex items-center gap-2">
+            <CalendarIcon className="w-5 h-5 text-slate-400" />
+            <span className="text-slate-300 text-sm font-medium">Khoảng thời gian:</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5">
+              <span className="text-xs text-slate-500">Từ</span>
+              <input 
+                type="date" 
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="bg-transparent text-slate-300 text-sm outline-none border-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:invert"
+              />
+            </div>
+            <span className="text-slate-500">→</span>
+            <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5">
+              <span className="text-xs text-slate-500">Đến</span>
+              <input 
+                type="date" 
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="bg-transparent text-slate-300 text-sm outline-none border-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:invert"
+              />
+            </div>
+          </div>
+          <div className="text-xs text-slate-500 ml-auto">
+            Tổng: <span className="text-white font-bold">{stats.total}</span> đơn
+            {stats.pending > 0 && <span className="ml-2 text-orange-400">({stats.pending} chờ)</span>}
           </div>
         </div>
 
-        <TabsContent value="list">
-          <Card className="bg-slate-800 border-slate-700 p-6">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-slate-700">
-                    <TableHead className="text-slate-300">ID</TableHead>
-                    <TableHead className="text-slate-300">User ID</TableHead>
-                    <TableHead className="text-slate-300">Dịch vụ</TableHead>
-                    <TableHead className="text-slate-300">Thời gian</TableHead>
-                    <TableHead className="text-slate-300">Trạng thái</TableHead>
+        {/* Mini stats with colors */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
+          <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-center">
+            <p className="text-xl font-bold text-orange-400">{stats.pending}</p>
+            <p className="text-[10px] text-orange-400/80 font-medium">⏳ Chờ xác nhận</p>
+          </div>
+          <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 text-center">
+            <p className="text-xl font-bold text-emerald-400">{stats.confirmed}</p>
+            <p className="text-[10px] text-emerald-400/80 font-medium">✓ Đã xác nhận</p>
+          </div>
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-center">
+            <p className="text-xl font-bold text-blue-400">{stats.ongoing}</p>
+            <p className="text-[10px] text-blue-400/80 font-medium">▶ Đang diễn ra</p>
+          </div>
+          <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-center">
+            <p className="text-xl font-bold text-green-400">{stats.completed}</p>
+            <p className="text-[10px] text-green-400/80 font-medium">✔ Hoàn thành</p>
+          </div>
+          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-center">
+            <p className="text-xl font-bold text-red-400">{stats.cancelled}</p>
+            <p className="text-[10px] text-red-400/80 font-medium">✕ Đã huỷ</p>
+          </div>
+        </div>
+      </Card>
+
+      {/* Bookings Table */}
+      <Card className="bg-slate-800 border-slate-700 p-6">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-slate-700">
+                <TableHead className="text-slate-300">ID</TableHead>
+                <TableHead className="text-slate-300">User ID</TableHead>
+                <TableHead className="text-slate-300">Dịch vụ</TableHead>
+                <TableHead className="text-slate-300">Ngày</TableHead>
+                <TableHead className="text-slate-300">Thời gian</TableHead>
+                <TableHead className="text-slate-300">Trạng thái</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-slate-500 py-8">
+                    Đang tải...
+                  </TableCell>
+                </TableRow>
+              ) : filteredBookings.length > 0 ? (
+                filteredBookings.map((booking) => (
+                  <TableRow key={booking.id} className="border-slate-700 hover:bg-slate-700/50">
+                    <TableCell className="text-slate-300 text-xs">{booking.id}</TableCell>
+                    <TableCell className="text-slate-300">{booking.userId}</TableCell>
+                    <TableCell>
+                      <Badge className={`${getServiceColor(booking.type)} border`}>
+                        <span className="flex items-center gap-1">
+                          {getServiceIcon(booking.type)}
+                          <span className="capitalize">
+                            {booking.type === 'karaoke' ? 'Karaoke' : booking.type === 'massage' ? 'Massage' : booking.type === 'restaurant' ? 'Nhà hàng' : booking.type}
+                          </span>
+                        </span>
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-slate-300">{booking.bookingDate}</TableCell>
+                    <TableCell className="text-slate-300">{booking.bookingTime}</TableCell>
+                    <TableCell>
+                      <Select
+                        defaultValue={booking.status || 'Chưa xác nhận'}
+                        onValueChange={(val) => handleStatusChange(booking.id, val)}
+                      >
+                        <SelectTrigger
+                          className="min-w-[10rem] border-0 bg-transparent p-0 shadow-none [&[data-state=open]]:ring-0"
+                        >
+                          <SelectValue>
+                            <Badge className={getStatusColor(booking.status || 'Chưa xác nhận')}>
+                              {booking.status || 'Chưa xác nhận'}
+                            </Badge>
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Chưa xác nhận">Chưa xác nhận</SelectItem>
+                          <SelectItem value="Đã xác nhận">Đã xác nhận</SelectItem>
+                          <SelectItem value="Đã huỷ">Đã huỷ</SelectItem>
+                          <SelectItem value="Đã đặt">Đã đặt</SelectItem>
+                          <SelectItem value="Đang diễn ra">Đang diễn ra</SelectItem>
+                          <SelectItem value="Đã hoàn thành">Đã hoàn thành</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredBookings.length > 0 ? (
-                    filteredBookings.map((booking) => (
-                      <TableRow key={booking.id} className="border-slate-700 hover:bg-slate-700/50">
-                        <TableCell className="text-slate-300">{booking.id}</TableCell>
-                        <TableCell className="text-slate-300">{booking.userId}</TableCell>
-                        <TableCell className="text-slate-300">{booking.type}</TableCell>
-                        <TableCell className="text-slate-300">{booking.bookingTime}</TableCell>
-                        <TableCell>
-                          <Select
-                            defaultValue={booking.status || 'Chưa xác nhận'}
-                            onValueChange={(val) => handleStatusChange(booking.id, val)}
-                          >
-                            <SelectTrigger
-                              className="min-w-[10rem] border-0 bg-transparent p-0 shadow-none [&[data-state=open]]:ring-0"
-                            >
-                              <SelectValue>
-                                <Badge className={getStatusColor(booking.status || 'Chưa xác nhận')}>
-                                  {booking.status || 'Chưa xác nhận'}
-                                </Badge>
-                              </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Chưa xác nhận">Chưa xác nhận</SelectItem>
-                              <SelectItem value="Đã xác nhận">Đã xác nhận</SelectItem>
-                              <SelectItem value="Đã huỷ">Đã huỷ</SelectItem>
-                              <SelectItem value="Đã đặt">Đã đặt</SelectItem>
-                              <SelectItem value="Đang diễn ra">Đang diễn ra</SelectItem>
-                              <SelectItem value="Đã hoàn thành">Đã hoàn thành</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center text-slate-500 py-8">
-                        Không có đơn đặt phòng nào trong ngày này
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="calendar">
-          <Card className="bg-slate-800 border-slate-700 p-6 overflow-x-auto">
-            <div className="min-w-[800px]">
-              <div className="grid grid-cols-[80px_1fr] gap-4">
-                {/* Headers */}
-                <div className="sticky left-0 bg-slate-800 z-10"></div>
-                <div className="grid grid-cols-4 gap-4">
-                  {rooms.slice(0, 4).map(room => (
-                    <div key={room.id} className="text-center font-bold text-slate-300 pb-4 border-b border-slate-700">
-                      {room.name}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Timeline Grid */}
-                <div className="flex flex-col border-r border-slate-700 pr-4">
-                  {hours.map(hour => (
-                    <div key={hour} className="h-20 flex items-start justify-end text-sm text-slate-500 font-medium relative top-[-10px]">
-                      {hour}:00
-                    </div>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-4 gap-4 relative mt-2">
-                  {/* Các đường kẻ khung giờ */}
-                  <div className="absolute inset-0 pointer-events-none flex flex-col">
-                    {hours.map(hour => (
-                      <div key={`line-${hour}`} className="h-20 border-t border-slate-700 border-dashed w-full opacity-50"></div>
-                    ))}
-                  </div>
-
-                  {rooms.slice(0, 4).map((room) => (
-                    <div key={`col-${room.id}`} className="relative border-l border-slate-700/50 pl-2 min-h-[1120px] bg-slate-800/30">
-                      {filteredBookings
-                        .filter((b) => (b.roomId === room.id || b.roomName === room.name) && b.status !== 'Đã huỷ')
-                        .map((booking) => {
-                          const style = getBookingStyle(booking.bookingTime || '');
-                          return (
-                            <div
-                              key={booking.id}
-                              className={`absolute left-2 right-2 border rounded-md p-2 flex flex-col z-10 overflow-hidden ${booking.status === 'Đã hoàn thành' ? 'bg-green-500/20 border-green-500/50' : 'bg-blue-500/20 border-blue-500/50'}`}
-                              style={style}
-                            >
-                              <span className={`font-bold text-[10px] sm:text-xs truncate ${booking.status === 'Đã hoàn thành' ? 'text-green-400' : 'text-blue-400'}`}>{booking.userId}</span>
-                              <span className="text-slate-300/80 text-[10px] mt-1">{booking.bookingTime}</span>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </Card>
-        </TabsContent>
-      </Tabs>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-slate-500 py-8">
+                    Không có đơn đặt phòng nào trong khoảng thời gian này
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
     </div>
   );
 }

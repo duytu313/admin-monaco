@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { db } from '@/lib/firebase-config';
 import { ref, onValue, push, set, update, remove } from 'firebase/database';
-import { Plus, Pencil, Trash2, Clock, AlertCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, Clock, AlertCircle, Upload, ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Promotion {
@@ -34,11 +34,13 @@ const emptyForm = {
   content: '',
   startDate: '',
   endDate: '',
-  imageUrl: '/images/placeholder.jpg',
+  imageUrl: '',
   isActive: true,
   featured: false,
   rules: [''],
 };
+
+const MAX_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB
 
 export default function PromotionsPage() {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
@@ -50,6 +52,11 @@ export default function PromotionsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...emptyForm });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Image upload state
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Delete confirm
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -98,13 +105,14 @@ export default function PromotionsPage() {
   /** Mở modal thêm mới */
   const openAddModal = () => {
     setEditingId(null);
+    setImagePreview(null);
     setForm({
       title: '',
       subtitle: '',
       content: '',
       startDate: new Date().toISOString().split('T')[0],
       endDate: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-      imageUrl: '/images/placeholder.jpg',
+      imageUrl: '',
       isActive: true,
       featured: false,
       rules: [''],
@@ -115,18 +123,66 @@ export default function PromotionsPage() {
   /** Mở modal sửa */
   const openEditModal = (promo: Promotion) => {
     setEditingId(promo.id);
+    setImagePreview(promo.imageUrl || null);
     setForm({
       title: promo.title,
       subtitle: promo.subtitle || '',
       content: promo.content,
       startDate: promo.startDate?.split('T')[0] || '',
       endDate: promo.endDate?.split('T')[0] || '',
-      imageUrl: promo.imageUrl || '/images/placeholder.jpg',
+      imageUrl: promo.imageUrl || '',
       isActive: promo.isActive ?? true,
       featured: promo.featured || false,
       rules: promo.rules?.length ? promo.rules : [''],
     });
     setIsModalOpen(true);
+  };
+
+  /** Xử lý upload ảnh - chuyển thành base64 */
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Kiểm tra kích thước
+    if (file.size > MAX_IMAGE_SIZE) {
+      toast.error(`Ảnh quá lớn! Tối đa ${MAX_IMAGE_SIZE / 1024 / 1024}MB`);
+      return;
+    }
+
+    // Kiểm tra định dạng
+    if (!file.type.startsWith('image/')) {
+      toast.error('Vui lòng chọn file hình ảnh!');
+      return;
+    }
+
+    setImageUploading(true);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      setImagePreview(base64);
+      setForm({ ...form, imageUrl: base64 });
+      setImageUploading(false);
+    };
+    reader.onerror = () => {
+      toast.error('Không thể đọc file ảnh!');
+      setImageUploading(false);
+    };
+    reader.readAsDataURL(file);
+
+    // Reset input để cho phép chọn lại cùng file
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  /** Xoá ảnh đã chọn */
+  const handleRemoveImage = () => {
+    setImagePreview(null);
+    setForm({ ...form, imageUrl: '' });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   /** Xử lý submit form */
@@ -146,7 +202,7 @@ export default function PromotionsPage() {
         content: form.content,
         startDate: form.startDate ? new Date(form.startDate).toISOString() : '',
         endDate: form.endDate ? new Date(form.endDate).toISOString() : '',
-        imageUrl: form.imageUrl || '/images/placeholder.jpg',
+        imageUrl: form.imageUrl || '',
         isActive: form.isActive,
         featured: form.featured,
         rules: form.rules.filter(r => r.trim() !== ''),
@@ -254,6 +310,7 @@ export default function PromotionsPage() {
         <Table>
           <TableHeader>
             <TableRow className="border-slate-700">
+              <TableHead className="text-slate-300">Hình ảnh</TableHead>
               <TableHead className="text-slate-300">Tiêu đề</TableHead>
               <TableHead className="text-slate-300">Phụ đề</TableHead>
               <TableHead className="text-slate-300">Ngày bắt đầu</TableHead>
@@ -265,19 +322,33 @@ export default function PromotionsPage() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-slate-400 py-8">
+                <TableCell colSpan={7} className="text-center text-slate-400 py-8">
                   Đang tải dữ liệu...
                 </TableCell>
               </TableRow>
             ) : promotions.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-slate-400 py-8">
+                <TableCell colSpan={7} className="text-center text-slate-400 py-8">
                   Chưa có khuyến mãi nào. Nhấn "Thêm khuyến mãi" để tạo mới.
                 </TableCell>
               </TableRow>
             ) : (
               promotions.map((promo) => (
                 <TableRow key={promo.id} className="border-slate-700 hover:bg-slate-700/50">
+                  <TableCell>
+                    {promo.imageUrl ? (
+                      <img
+                        src={promo.imageUrl}
+                        alt={promo.title}
+                        className="w-12 h-12 rounded-lg object-cover border border-slate-600"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-lg bg-slate-700 flex items-center justify-center">
+                        <ImageIcon className="w-5 h-5 text-slate-500" />
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell className="text-slate-200 font-medium">
                     {promo.featured && <span className="text-amber-400 mr-1">★</span>}
                     {promo.title}
@@ -393,16 +464,49 @@ export default function PromotionsPage() {
                 </div>
               </div>
 
-              {/* Image URL */}
+              {/* Upload hình ảnh */}
               <div className="space-y-2">
-                <Label htmlFor="imageUrl" className="text-slate-300">URL hình ảnh</Label>
-                <Input
-                  id="imageUrl"
-                  placeholder="/images/placeholder.jpg"
-                  className="bg-slate-900 border-slate-700 text-white"
-                  value={form.imageUrl}
-                  onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
-                />
+                <Label className="text-slate-300">Hình ảnh khuyến mãi</Label>
+                <div className="flex flex-col gap-3">
+                  {/* Preview */}
+                  {imagePreview && (
+                    <div className="relative w-full max-w-[300px] rounded-lg overflow-hidden border border-slate-600">
+                      <img
+                        src={imagePreview}
+                        alt="Preview"
+                        className="w-full h-40 object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRemoveImage}
+                        className="absolute top-2 right-2 bg-red-500/80 hover:bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      className="hidden"
+                      id="image-upload"
+                    />
+                    <label
+                      htmlFor="image-upload"
+                      className="flex items-center gap-2 px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg cursor-pointer hover:bg-slate-700/50 transition-colors text-slate-300 text-sm"
+                    >
+                      <Upload className="w-4 h-4" />
+                      {imageUploading ? 'Đang xử lý...' : 'Chọn ảnh'}
+                    </label>
+                    <span className="text-xs text-slate-500">
+                      Hỗ trợ: JPG, PNG, GIF (tối đa 2MB)
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {/* Tuỳ chọn */}
@@ -472,7 +576,7 @@ export default function PromotionsPage() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || imageUploading}
                   className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold"
                 >
                   {isSubmitting ? 'Đang lưu...' : editingId ? 'Cập nhật' : 'Thêm mới'}

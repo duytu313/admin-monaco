@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/table';
 import { Card } from '@/components/ui/card';
 import { CheckCircle2, XCircle, Clock } from 'lucide-react';
-import { ref, onValue, update } from 'firebase/database';
+import { ref, onValue, update, get } from 'firebase/database';
 import { db } from '@/lib/firebase-config';
 
 export default function PointRequestsPage() {
@@ -36,8 +36,44 @@ export default function PointRequestsPage() {
     return () => unsub();
   }, []);
 
-  const handleApprove = (id: string) => {
-    update(ref(db, `pointRequests/${id}`), { status: 'approved' });
+  const handleApprove = async (id: string) => {
+    const request = requests.find(r => r.id === id);
+    if (!request || !request.userId) {
+      alert('Dữ liệu yêu cầu không hợp lệ.');
+      return;
+    }
+
+    try {
+      // 1. Tìm nameKey từ userId (vì cấu trúc DB của bạn lưu profile theo nameKey)
+      const uidMapSnap = await get(ref(db, `users/uidMap/${request.userId}`));
+      if (!uidMapSnap.exists()) {
+        alert('Không tìm thấy thông tin định danh người dùng!');
+        return;
+      }
+      const nameKey = uidMapSnap.val();
+
+      // 2. Lấy thông tin điểm hiện tại từ profile
+      const profileSnap = await get(ref(db, `users/profiles/${nameKey}`));
+      if (!profileSnap.exists()) {
+        alert('Không tìm thấy hồ sơ khách hàng!');
+        return;
+      }
+
+      const profile = profileSnap.val();
+      const currentPoints = profile.points || 0;
+      const pointsCost = Number(request.pointsCost || 0);
+
+      // 3. Thực hiện cập nhật đồng thời: đổi trạng thái và trừ điểm
+      const updates: any = {};
+      updates[`pointRequests/${id}/status`] = 'approved';
+      updates[`users/profiles/${nameKey}/points`] = Math.max(0, currentPoints - pointsCost);
+
+      await update(ref(db), updates);
+      alert('Duyệt yêu cầu và trừ điểm khách hàng thành công!');
+    } catch (error) {
+      console.error("Lỗi khi duyệt đổi điểm:", error);
+      alert('Đã xảy ra lỗi trong quá trình xử lý. Vui lòng thử lại.');
+    }
   };
 
   const handleReject = (id: string) => {
