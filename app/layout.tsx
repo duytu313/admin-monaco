@@ -7,7 +7,7 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Admin Dashboard - Quản Lý Karaoke',
+  title: 'Admin Monaco',
   description: 'Hệ thống quản lý karaoke toàn diện',
   icons: {
     icon: '/images/logo.png',
