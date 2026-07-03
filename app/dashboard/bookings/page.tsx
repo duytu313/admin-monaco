@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { CalendarIcon, Mic, Heart, Soup } from 'lucide-react';
+import { CalendarIcon, Mic, Heart, Soup, Search } from 'lucide-react';
 import {
   BOOKING_STATUSES,
   ALL_BOOKING_STATUSES,
@@ -48,11 +48,15 @@ const getServiceColor = (type: string) => {
 
 export default function BookingsPage() {
   const [bookingList, setBookingList] = useState<any[]>([]);
+  const [users, setUsers] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentError, setPaymentError] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [selectedBookingDetail, setSelectedBookingDetail] = useState<any>(null);
 
   // Date range filter
   const [startDate, setStartDate] = useState(() => {
@@ -65,21 +69,32 @@ export default function BookingsPage() {
     return weekLater.toISOString().split('T')[0]; // 7 ngày sau
   });
 
-  // Lọc ra các booking trong khoảng ngày được chọn
+  // Lọc ra các booking trong khoảng ngày được chọn và theo search query
   const filteredBookings = bookingList.filter(b => {
-    if (!b.bookingDate) return true;
-    // Chuyển đổi bookingDate thành Date để so sánh
-    const parts = b.bookingDate.split('/');
-    let bookingDateObj: Date;
-    if (parts.length === 3) {
-      // dd/mm/yyyy
-      bookingDateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-    } else {
-      bookingDateObj = new Date(b.bookingDate + 'T00:00:00');
+    // Filter by date range
+    if (b.bookingDate) {
+      const parts = b.bookingDate.split('/');
+      let bookingDateObj: Date;
+      if (parts.length === 3) {
+        bookingDateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+      } else {
+        bookingDateObj = new Date(b.bookingDate + 'T00:00:00');
+      }
+      const start = new Date(startDate + 'T00:00:00');
+      const end = new Date(endDate + 'T23:59:59');
+      if (bookingDateObj < start || bookingDateObj > end) return false;
     }
-    const start = new Date(startDate + 'T00:00:00');
-    const end = new Date(endDate + 'T23:59:59');
-    return bookingDateObj >= start && bookingDateObj <= end;
+
+    // Filter by search query (username, userId, booking id)
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const user = users[b.userId];
+      const username = user?.username || user?.name || user?.nameKey || '';
+      const searchableText = `${username} ${b.userId} ${b.id}`.toLowerCase();
+      if (!searchableText.includes(q)) return false;
+    }
+
+    return true;
   });
 
   // Helper để chuẩn hóa trạng thái
@@ -111,6 +126,36 @@ export default function BookingsPage() {
     cancelled: filteredBookings.filter(b => normalizeStatus(normalizeBookingStatus(b.status)) === 'cancelled').length,
   };
 
+  // Fetch users data
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const res = await fetch('/api/list-users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = await res.json();
+        if (data.users) {
+          // Create map indexed by authUid for easy lookup
+          const usersMap: Record<string, any> = {};
+          data.users.forEach((user: any) => {
+            // Map by authUid (Firebase UID used in bookings)
+            if (user.authUid) {
+              usersMap[user.authUid] = user;
+            }
+            // Also map by nameKey as fallback
+            usersMap[user.nameKey] = user;
+          });
+          setUsers(usersMap);
+        }
+      } catch (err) {
+        console.error('Error fetching users:', err);
+      }
+    };
+    fetchUsers();
+  }, []);
+
   useEffect(() => {
     const bookingsRef = ref(db, 'bookings');
     const unsubBookings = onValue(bookingsRef, (snapshot) => {
@@ -138,7 +183,7 @@ export default function BookingsPage() {
 
   const handleOpenPayment = (booking: any) => {
     setSelectedBooking(booking);
-    setPaymentAmount(String(booking.totalEst ?? booking.totalAmount ?? ''));
+    setPaymentAmount(String(booking.finalAmount ?? booking.totalEst ?? booking.totalAmount ?? ''));
     setPaymentError('');
     setPaymentDialogOpen(true);
   };
@@ -168,7 +213,8 @@ export default function BookingsPage() {
       const bookingRef = ref(db, `bookings/${selectedBooking.id}`);
       await update(bookingRef, {
         status: BOOKING_STATUSES.PAID,
-        totalEst: amount,
+        finalAmount: amount,
+        paidAmount: amount,
       });
       setPaymentDialogOpen(false);
       setSelectedBooking(null);
@@ -186,37 +232,53 @@ export default function BookingsPage() {
         <p className="text-slate-400 mt-2">Xem và quản lý tất cả đơn đặt phòng</p>
       </div>
 
-      {/* Date Range Filter */}
+      {/* Search and Filters */}
       <Card className="bg-slate-800 border-slate-700 p-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-          <div className="flex items-center gap-2">
-            <CalendarIcon className="w-5 h-5 text-slate-400" />
-            <span className="text-slate-300 text-sm font-medium">Khoảng thời gian:</span>
+          {/* Search Bar */}
+          <div className="relative flex-1 w-full sm:w-auto">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Tìm kiếm theo tên người dùng, User ID..."
+              autoComplete="off"
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-white text-sm focus:outline-none focus:border-blue-500 placeholder:text-slate-500"
+            />
           </div>
+
+          {/* Date Range Filter */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5">
-              <span className="text-xs text-slate-500">Từ</span>
-              <input 
-                type="date" 
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="bg-transparent text-slate-300 text-sm outline-none border-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:invert"
-              />
+            <div className="flex items-center gap-2">
+              <CalendarIcon className="w-5 h-5 text-slate-400" />
+              <span className="text-slate-300 text-sm font-medium">Khoảng thời gian:</span>
             </div>
-            <span className="text-slate-500">→</span>
-            <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5">
-              <span className="text-xs text-slate-500">Đến</span>
-              <input 
-                type="date" 
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="bg-transparent text-slate-300 text-sm outline-none border-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:invert"
-              />
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5">
+                <span className="text-xs text-slate-500">Từ</span>
+                <input 
+                  type="date" 
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="bg-transparent text-slate-300 text-sm outline-none border-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:invert"
+                />
+              </div>
+              <span className="text-slate-500">→</span>
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5">
+                <span className="text-xs text-slate-500">Đến</span>
+                <input 
+                  type="date" 
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="bg-transparent text-slate-300 text-sm outline-none border-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:invert"
+                />
+              </div>
             </div>
-          </div>
-          <div className="text-xs text-slate-500 ml-auto">
-            Tổng: <span className="text-white font-bold">{stats.total}</span> đơn
-            {stats.pending > 0 && <span className="ml-2 text-orange-400">({stats.pending} chờ)</span>}
+            <div className="text-xs text-slate-500 ml-auto">
+              Tổng: <span className="text-white font-bold">{stats.total}</span> đơn
+              {stats.pending > 0 && <span className="ml-2 text-orange-400">({stats.pending} chờ)</span>}
+            </div>
           </div>
         </div>
 
@@ -271,66 +333,82 @@ export default function BookingsPage() {
                   </TableCell>
                 </TableRow>
               ) : filteredBookings.length > 0 ? (
-                filteredBookings.map((booking) => (
-                  <TableRow key={booking.id} className="border-slate-700 hover:bg-slate-700/50">
-                    <TableCell className="text-slate-300 text-xs">{booking.id}</TableCell>
-                    <TableCell className="text-slate-300">{booking.userId}</TableCell>
-                    <TableCell>
-                      <Badge className={`${getServiceColor(booking.type)} border`}>
-                        <span className="flex items-center gap-1">
-                          {getServiceIcon(booking.type)}
-                          <span className="capitalize">
-                            {booking.type === 'karaoke' ? 'Karaoke' : booking.type === 'massage' ? 'Massage' : booking.type === 'restaurant' ? 'Nhà hàng' : booking.type}
+                filteredBookings.map((booking) => {
+                  const user = users[booking.userId];
+                  const username = user?.username || user?.name || user?.nameKey || booking.userId;
+                  return (
+                    <TableRow 
+                      key={booking.id} 
+                      className="border-slate-700 hover:bg-slate-700/50 cursor-pointer"
+                      onClick={() => {
+                        setSelectedBookingDetail(booking);
+                        setDetailDialogOpen(true);
+                      }}
+                    >
+                      <TableCell className="text-slate-300 text-xs">{booking.id}</TableCell>
+                      <TableCell className="text-slate-300">
+                        <div className="flex flex-col">
+                          <span className="font-medium text-blue-400">{username}</span>
+                          <span className="text-xs text-slate-500">{booking.userId}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={`${getServiceColor(booking.type)} border`}>
+                          <span className="flex items-center gap-1">
+                            {getServiceIcon(booking.type)}
+                            <span className="capitalize">
+                              {booking.type === 'karaoke' ? 'Karaoke' : booking.type === 'massage' ? 'Massage' : booking.type === 'restaurant' ? 'Nhà hàng' : booking.type}
+                            </span>
                           </span>
-                        </span>
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-slate-300">{booking.bookingDate}</TableCell>
-                    <TableCell className="text-slate-300">{booking.bookingTime}</TableCell>
-                    <TableCell>
-                      <Select
-                        value={normalizeBookingStatus(booking.status)}
-                        onValueChange={(val) => handleStatusChange(booking.id, val)}
-                      >
-                        <SelectTrigger
-                          className="min-w-[10rem] border-0 bg-transparent p-0 shadow-none [&[data-state=open]]:ring-0"
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-slate-300">{booking.bookingDate}</TableCell>
+                      <TableCell className="text-slate-300">{booking.bookingTime}</TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Select
+                          value={normalizeBookingStatus(booking.status)}
+                          onValueChange={(val) => handleStatusChange(booking.id, val)}
                         >
-                          <SelectValue>
-                            <Badge className={getStatusColor(booking.status)}>
-                              {normalizeBookingStatus(booking.status)}
-                            </Badge>
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={BOOKING_STATUSES.WAITING_FOR_CONFIRMATION}>
-                            {BOOKING_STATUSES.WAITING_FOR_CONFIRMATION}
-                          </SelectItem>
-                          <SelectItem value={BOOKING_STATUSES.CONFIRMED}>
-                            {BOOKING_STATUSES.CONFIRMED}
-                          </SelectItem>
-                          <SelectItem value={BOOKING_STATUSES.ARRIVED}>
-                            {BOOKING_STATUSES.ARRIVED}
-                          </SelectItem>
-                          <SelectItem value={BOOKING_STATUSES.USING}>
-                            {BOOKING_STATUSES.USING}
-                          </SelectItem>
-                          <SelectItem value={BOOKING_STATUSES.WAITING_TO_ARRIVE}>
-                            {BOOKING_STATUSES.WAITING_TO_ARRIVE}
-                          </SelectItem>
-                          <SelectItem value={BOOKING_STATUSES.WAITING_FOR_PAYMENT}>
-                            {BOOKING_STATUSES.WAITING_FOR_PAYMENT}
-                          </SelectItem>
-                          <SelectItem value={BOOKING_STATUSES.PAID}>
-                            {BOOKING_STATUSES.PAID}
-                          </SelectItem>
-                          <SelectItem value={BOOKING_STATUSES.CANCELLED}>
-                            {BOOKING_STATUSES.CANCELLED}
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                  </TableRow>
-                ))
+                          <SelectTrigger
+                            className="min-w-[10rem] border-0 bg-transparent p-0 shadow-none [&[data-state=open]]:ring-0"
+                          >
+                            <SelectValue>
+                              <Badge className={getStatusColor(booking.status)}>
+                                {normalizeBookingStatus(booking.status)}
+                              </Badge>
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={BOOKING_STATUSES.WAITING_FOR_CONFIRMATION}>
+                              {BOOKING_STATUSES.WAITING_FOR_CONFIRMATION}
+                            </SelectItem>
+                            <SelectItem value={BOOKING_STATUSES.CONFIRMED}>
+                              {BOOKING_STATUSES.CONFIRMED}
+                            </SelectItem>
+                            <SelectItem value={BOOKING_STATUSES.ARRIVED}>
+                              {BOOKING_STATUSES.ARRIVED}
+                            </SelectItem>
+                            <SelectItem value={BOOKING_STATUSES.USING}>
+                              {BOOKING_STATUSES.USING}
+                            </SelectItem>
+                            <SelectItem value={BOOKING_STATUSES.WAITING_TO_ARRIVE}>
+                              {BOOKING_STATUSES.WAITING_TO_ARRIVE}
+                            </SelectItem>
+                            <SelectItem value={BOOKING_STATUSES.WAITING_FOR_PAYMENT}>
+                              {BOOKING_STATUSES.WAITING_FOR_PAYMENT}
+                            </SelectItem>
+                            <SelectItem value={BOOKING_STATUSES.PAID}>
+                              {BOOKING_STATUSES.PAID}
+                            </SelectItem>
+                            <SelectItem value={BOOKING_STATUSES.CANCELLED}>
+                              {BOOKING_STATUSES.CANCELLED}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               ) : (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center text-slate-500 py-8">
@@ -342,6 +420,210 @@ export default function BookingsPage() {
           </Table>
         </div>
       </Card>
+
+      {/* Booking Detail Dialog */}
+      <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-white">Chi tiết đơn đặt phòng</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Thông tin chi tiết về đơn đặt phòng
+            </DialogDescription>
+          </DialogHeader>
+          {selectedBookingDetail && (
+            <div className="space-y-4 py-4">
+              {/* User Info */}
+              <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-slate-300 mb-3">Thông tin khách hàng</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs text-slate-500">Tên người dùng</p>
+                    <p className="text-sm text-white font-medium">
+                      {users[selectedBookingDetail.userId]?.username || 
+                       users[selectedBookingDetail.userId]?.name || 
+                       users[selectedBookingDetail.userId]?.nameKey || 
+                       selectedBookingDetail.userId}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">User ID</p>
+                    <p className="text-sm text-slate-300">{selectedBookingDetail.userId}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Booking Info */}
+              <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-slate-300 mb-3">Thông tin đơn hàng</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs text-slate-500">Mã đơn hàng</p>
+                    <p className="text-sm text-white font-medium">{selectedBookingDetail.id}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Dịch vụ</p>
+                    <Badge className={`${getServiceColor(selectedBookingDetail.type)} border mt-1`}>
+                      <span className="flex items-center gap-1">
+                        {getServiceIcon(selectedBookingDetail.type)}
+                        <span className="capitalize">
+                          {selectedBookingDetail.type === 'karaoke' ? 'Karaoke' : 
+                           selectedBookingDetail.type === 'massage' ? 'Massage' : 
+                           selectedBookingDetail.type === 'restaurant' ? 'Nhà hàng' : 
+                           selectedBookingDetail.type}
+                        </span>
+                      </span>
+                    </Badge>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Ngày đặt</p>
+                    <p className="text-sm text-white">{selectedBookingDetail.bookingDate}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Thời gian</p>
+                    <p className="text-sm text-white">{selectedBookingDetail.bookingTime}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Trạng thái</p>
+                    <Badge className={getStatusColor(selectedBookingDetail.status)}>
+                      {normalizeBookingStatus(selectedBookingDetail.status)}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Details */}
+              <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-slate-300 mb-3">Chi tiết thanh toán</h3>
+                <div className="space-y-2">
+                  {/* Show service price if available */}
+                  {selectedBookingDetail.servicePrice && Number(selectedBookingDetail.servicePrice) > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-slate-400">Tiền dịch vụ:</span>
+                      <span className="text-sm text-white">
+                        {Number(selectedBookingDetail.servicePrice).toLocaleString('vi-VN')} VNĐ
+                      </span>
+                    </div>
+                  )}
+                  
+                  {/* Show room price if available */}
+                  {selectedBookingDetail.roomPrice && Number(selectedBookingDetail.roomPrice) > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-slate-400">Tiền phòng:</span>
+                      <span className="text-sm text-white">
+                        {Number(selectedBookingDetail.roomPrice).toLocaleString('vi-VN')} VNĐ
+                      </span>
+                    </div>
+                  )}
+                  
+                  {/* Show total amount (tổng tiền gốc) */}
+                  {selectedBookingDetail.totalAmount && Number(selectedBookingDetail.totalAmount) > 0 && (
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-700">
+                      <span className="text-sm font-medium text-slate-300">Tổng tiền:</span>
+                      <span className="text-sm font-bold text-white">
+                        {Number(selectedBookingDetail.totalAmount).toLocaleString('vi-VN')} VNĐ
+                      </span>
+                    </div>
+                  )}
+                  
+                  {/* Show final amount if available (ưu tiên cao nhất) */}
+                  {selectedBookingDetail.finalAmount && Number(selectedBookingDetail.finalAmount) > 0 && (
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-700">
+                      <span className="text-sm font-medium text-slate-300">Tổng tiền cuối:</span>
+                      <span className="text-sm font-bold text-green-400">
+                        {Number(selectedBookingDetail.finalAmount).toLocaleString('vi-VN')} VNĐ
+                      </span>
+                    </div>
+                  )}
+                  
+                  {/* Show paid amount if available */}
+                  {selectedBookingDetail.paidAmount && Number(selectedBookingDetail.paidAmount) > 0 && (
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-700">
+                      <span className="text-sm font-medium text-slate-300">Tiền đã thanh toán:</span>
+                      <span className="text-sm font-bold text-emerald-400">
+                        {Number(selectedBookingDetail.paidAmount).toLocaleString('vi-VN')} VNĐ
+                      </span>
+                    </div>
+                  )}
+                  
+                  {/* Show totalEst as fallback (chỉ khi các trường khác không có) */}
+                  {!selectedBookingDetail.finalAmount && 
+                   !selectedBookingDetail.paidAmount && 
+                   !selectedBookingDetail.totalAmount && 
+                   selectedBookingDetail.totalEst && 
+                   Number(selectedBookingDetail.totalEst) > 0 &&
+                   Number(selectedBookingDetail.totalEst) < 1000000000 && (
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-700">
+                      <span className="text-sm font-medium text-slate-300">Tiền thanh toán:</span>
+                      <span className="text-sm font-bold text-emerald-400">
+                        {Number(selectedBookingDetail.totalEst).toLocaleString('vi-VN')} VNĐ
+                      </span>
+                    </div>
+                  )}
+                  
+                  {/* Show points earned if available */}
+                  {selectedBookingDetail.pointsEarned && Number(selectedBookingDetail.pointsEarned) > 0 && (
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-700">
+                      <span className="text-sm font-medium text-slate-300">Điểm tích lũy:</span>
+                      <span className="text-sm font-bold text-amber-400">
+                        +{Number(selectedBookingDetail.pointsEarned).toLocaleString('vi-VN')} điểm
+                      </span>
+                    </div>
+                  )}
+                  
+                  {/* Show message if no payment info */}
+                  {!selectedBookingDetail.servicePrice && 
+                   !selectedBookingDetail.roomPrice && 
+                   !selectedBookingDetail.totalAmount && 
+                   !selectedBookingDetail.finalAmount && 
+                   !selectedBookingDetail.paidAmount && 
+                   (!selectedBookingDetail.totalEst || Number(selectedBookingDetail.totalEst) === 0 || Number(selectedBookingDetail.totalEst) >= 1000000000) && (
+                    <p className="text-sm text-slate-500 italic">Chưa có thông tin thanh toán</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Additional Details */}
+              {selectedBookingDetail.notes && (
+                <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-slate-300 mb-2">Ghi chú</h3>
+                  <p className="text-sm text-slate-300">{selectedBookingDetail.notes}</p>
+                </div>
+              )}
+
+              {/* Timestamps */}
+              <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-slate-300 mb-3">Thời gian</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  {selectedBookingDetail.createdAt && (
+                    <div>
+                      <p className="text-xs text-slate-500">Tạo lúc</p>
+                      <p className="text-sm text-slate-300">
+                        {new Date(selectedBookingDetail.createdAt).toLocaleString('vi-VN')}
+                      </p>
+                    </div>
+                  )}
+                  {selectedBookingDetail.updatedAt && (
+                    <div>
+                      <p className="text-xs text-slate-500">Cập nhật lúc</p>
+                      <p className="text-sm text-slate-300">
+                        {new Date(selectedBookingDetail.updatedAt).toLocaleString('vi-VN')}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button 
+              onClick={() => setDetailDialogOpen(false)}
+              className="bg-slate-700 hover:bg-slate-600 text-white"
+            >
+              Đóng
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Payment Dialog */}
       <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
@@ -361,7 +643,7 @@ export default function BookingsPage() {
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}
                 placeholder="Nhập số tiền..."
-                className="bg-slate-900 border-slate-700 text-white"
+                className="bg-slate-900 border border-slate-700 text-white"
               />
               {paymentError && (
                 <p className="text-red-400 text-sm">{paymentError}</p>

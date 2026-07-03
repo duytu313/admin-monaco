@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Banknote, ShoppingCart, Users, Star, AlertCircle } from 'lucide-react';
+import { normalizeBookingStatus, BOOKING_STATUSES } from '@/lib/booking-constants';
 import {
   LineChart,
   Line,
@@ -74,7 +75,13 @@ export default function DashboardOverview() {
           orderCount += 1;
           if (b.userId) uniqueUsers.add(b.userId);
 
-          const itemRevenue = Number(b.totalAmount || 0);
+          // Chuẩn hóa trạng thái và kiểm tra đã thanh toán
+          const normalizedStatus = normalizeBookingStatus(b.status);
+          const isPaid = normalizedStatus === BOOKING_STATUSES.PAID;
+
+          // Chỉ tính doanh thu từ các booking đã thanh toán
+          // Ưu tiên: paidAmount (tiền thực thu) > finalAmount (sau giảm giá) > totalAmount (giá gốc)
+          const itemRevenue = isPaid ? Number(b.paidAmount || b.finalAmount || b.totalAmount || 0) : 0;
           revenue += itemRevenue;
 
           const serviceName = (b.type || 'Khác').toLowerCase();
@@ -94,8 +101,12 @@ export default function DashboardOverview() {
             if (!isNaN(d.getTime())) {
               const day = d.getDay(); // 0 = Sunday
               const month = d.getMonth(); // 0-11
-              initialLineData[day].revenue += itemRevenue;
-              initialMonthlyData[month].revenue += itemRevenue;
+              // Chỉ thêm vào biểu đồ doanh thu nếu booking đã thanh toán
+              if (isPaid) {
+                const chartRevenue = Number(b.paidAmount || b.finalAmount || b.totalAmount || 0);
+                initialLineData[day].revenue += chartRevenue;
+                initialMonthlyData[month].revenue += chartRevenue;
+              }
             }
           }
         });
