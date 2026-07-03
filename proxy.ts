@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 
 const ADMIN_ROLE_COOKIE = 'adminRole';
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const role = req.cookies.get(ADMIN_ROLE_COOKIE)?.value;
 
