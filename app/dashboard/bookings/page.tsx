@@ -16,30 +16,14 @@ import { ref, onValue, update } from 'firebase/database';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { CalendarIcon, BarChart3, Mic, Heart, Soup } from 'lucide-react';
-
-const getStatusColor = (status: string) => {
-  const s = (status || '').toLowerCase();
-  // Hoàn thành / Đã thanh toán
-  if (s === 'đã hoàn thành' || s === 'đã thanh toán' || s === 'completed' || s === 'paid')
-    return 'bg-green-500/20 text-green-400 border-green-500/30';
-  // Đang diễn ra / Đang dùng
-  if (s === 'đang diễn ra' || s === 'đang dùng' || s === 'ongoing')
-    return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
-  // Đã đặt
-  if (s === 'đã đặt' || s === 'booked')
-    return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
-  // Đã xác nhận / confirmed
-  if (s === 'đã xác nhận' || s === 'confirmed')
-    return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
-  // Chưa xác nhận / Chờ xác nhận / pending
-  if (s === 'chưa xác nhận' || s === 'chờ xác nhận' || s === 'pending' || s === 'chờ xử lý')
-    return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
-  // Đã huỷ / cancelled
-  if (s === 'đã huỷ' || s === 'đã hủy' || s === 'cancelled')
-    return 'bg-red-500/20 text-red-400 border-red-500/30';
-  // Mặc định
-  return 'bg-slate-500/20 text-slate-400 border-slate-500/30';
-};
+import {
+  BOOKING_STATUSES,
+  ALL_BOOKING_STATUSES,
+  normalizeBookingStatus,
+  getStatusColor,
+  getStatusLabel,
+  STATUS_COLORS,
+} from '@/lib/booking-constants';
 
 const getServiceIcon = (type: string) => {
   switch (type) {
@@ -93,24 +77,31 @@ export default function BookingsPage() {
 
   // Helper để chuẩn hóa trạng thái
   const normalizeStatus = (status: string): string => {
-    const s = (status || '').toLowerCase();
-    if (s === 'đã hoàn thành' || s === 'completed' || s === 'đã thanh toán' || s === 'paid') return 'completed';
-    if (s === 'đang diễn ra' || s === 'ongoing' || s === 'đang dùng') return 'ongoing';
-    if (s === 'đã đặt' || s === 'booked') return 'booked';
-    if (s === 'đã xác nhận' || s === 'confirmed') return 'confirmed';
-    if (s === 'chưa xác nhận' || s === 'chờ xác nhận' || s === 'pending' || s === 'chờ xử lý') return 'pending';
-    if (s === 'đã huỷ' || s === 'đã hủy' || s === 'cancelled') return 'cancelled';
+    const normalized = normalizeBookingStatus(status);
+    // Nhóm các trạng thái cho thống kê
+    if (normalized === BOOKING_STATUSES.WAITING_FOR_CONFIRMATION) return 'pending';
+    if (normalized === BOOKING_STATUSES.CONFIRMED) return 'confirmed';
+    if (normalized === BOOKING_STATUSES.ARRIVED) return 'arrived';
+    if (normalized === BOOKING_STATUSES.USING) return 'using';
+    if (normalized === BOOKING_STATUSES.WAITING_TO_ARRIVE) return 'waiting';
+    if (normalized === BOOKING_STATUSES.WAITING_FOR_PAYMENT) return 'waiting_payment';
+    if (normalized === BOOKING_STATUSES.PAID) return 'completed';
+    if (normalized === BOOKING_STATUSES.CANCELLED) return 'cancelled';
     return 'other';
   };
 
   // Thống kê theo khoảng thời gian
   const stats = {
     total: filteredBookings.length,
-    pending: filteredBookings.filter(b => normalizeStatus(b.status) === 'pending').length,
-    confirmed: filteredBookings.filter(b => normalizeStatus(b.status) === 'confirmed' || normalizeStatus(b.status) === 'booked').length,
-    ongoing: filteredBookings.filter(b => normalizeStatus(b.status) === 'ongoing').length,
-    completed: filteredBookings.filter(b => normalizeStatus(b.status) === 'completed').length,
-    cancelled: filteredBookings.filter(b => normalizeStatus(b.status) === 'cancelled').length,
+    pending: filteredBookings.filter(b => normalizeStatus(normalizeBookingStatus(b.status)) === 'pending').length,
+    confirmed: filteredBookings.filter(b => {
+      const norm = normalizeStatus(normalizeBookingStatus(b.status));
+      return norm === 'confirmed' || norm === 'arrived' || norm === 'waiting' || norm === 'using';
+    }).length,
+    using: filteredBookings.filter(b => normalizeStatus(normalizeBookingStatus(b.status)) === 'using').length,
+    waiting_payment: filteredBookings.filter(b => normalizeStatus(normalizeBookingStatus(b.status)) === 'waiting_payment').length,
+    completed: filteredBookings.filter(b => normalizeStatus(normalizeBookingStatus(b.status)) === 'completed').length,
+    cancelled: filteredBookings.filter(b => normalizeStatus(normalizeBookingStatus(b.status)) === 'cancelled').length,
   };
 
   useEffect(() => {
@@ -178,7 +169,7 @@ export default function BookingsPage() {
         </div>
 
         {/* Mini stats with colors */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
           <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-center">
             <p className="text-xl font-bold text-orange-400">{stats.pending}</p>
             <p className="text-[10px] text-orange-400/80 font-medium">⏳ Chờ xác nhận</p>
@@ -188,16 +179,20 @@ export default function BookingsPage() {
             <p className="text-[10px] text-emerald-400/80 font-medium">✓ Đã xác nhận</p>
           </div>
           <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-center">
-            <p className="text-xl font-bold text-blue-400">{stats.ongoing}</p>
-            <p className="text-[10px] text-blue-400/80 font-medium">▶ Đang diễn ra</p>
+            <p className="text-xl font-bold text-blue-400">{stats.using}</p>
+            <p className="text-[10px] text-blue-400/80 font-medium">▶ Đang dùng</p>
+          </div>
+          <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3 text-center">
+            <p className="text-xl font-bold text-purple-400">{stats.waiting_payment}</p>
+            <p className="text-[10px] text-purple-400/80 font-medium">💳 Chờ thanh toán</p>
           </div>
           <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-center">
             <p className="text-xl font-bold text-green-400">{stats.completed}</p>
-            <p className="text-[10px] text-green-400/80 font-medium">✔ Hoàn thành</p>
+            <p className="text-[10px] text-green-400/80 font-medium">✔ Đã thanh toán</p>
           </div>
           <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-center">
             <p className="text-xl font-bold text-red-400">{stats.cancelled}</p>
-            <p className="text-[10px] text-red-400/80 font-medium">✕ Đã huỷ</p>
+            <p className="text-[10px] text-red-400/80 font-medium">✕ Đã hủy</p>
           </div>
         </div>
       </Card>
@@ -242,25 +237,43 @@ export default function BookingsPage() {
                     <TableCell className="text-slate-300">{booking.bookingTime}</TableCell>
                     <TableCell>
                       <Select
-                        defaultValue={booking.status || 'Chưa xác nhận'}
+                        defaultValue={normalizeBookingStatus(booking.status)}
                         onValueChange={(val) => handleStatusChange(booking.id, val)}
                       >
                         <SelectTrigger
                           className="min-w-[10rem] border-0 bg-transparent p-0 shadow-none [&[data-state=open]]:ring-0"
                         >
                           <SelectValue>
-                            <Badge className={getStatusColor(booking.status || 'Chưa xác nhận')}>
-                              {booking.status || 'Chưa xác nhận'}
+                            <Badge className={getStatusColor(booking.status)}>
+                              {normalizeBookingStatus(booking.status)}
                             </Badge>
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Chưa xác nhận">Chưa xác nhận</SelectItem>
-                          <SelectItem value="Đã xác nhận">Đã xác nhận</SelectItem>
-                          <SelectItem value="Đã huỷ">Đã huỷ</SelectItem>
-                          <SelectItem value="Đã đặt">Đã đặt</SelectItem>
-                          <SelectItem value="Đang diễn ra">Đang diễn ra</SelectItem>
-                          <SelectItem value="Đã hoàn thành">Đã hoàn thành</SelectItem>
+                          <SelectItem value={BOOKING_STATUSES.WAITING_FOR_CONFIRMATION}>
+                            {BOOKING_STATUSES.WAITING_FOR_CONFIRMATION}
+                          </SelectItem>
+                          <SelectItem value={BOOKING_STATUSES.CONFIRMED}>
+                            {BOOKING_STATUSES.CONFIRMED}
+                          </SelectItem>
+                          <SelectItem value={BOOKING_STATUSES.ARRIVED}>
+                            {BOOKING_STATUSES.ARRIVED}
+                          </SelectItem>
+                          <SelectItem value={BOOKING_STATUSES.USING}>
+                            {BOOKING_STATUSES.USING}
+                          </SelectItem>
+                          <SelectItem value={BOOKING_STATUSES.WAITING_TO_ARRIVE}>
+                            {BOOKING_STATUSES.WAITING_TO_ARRIVE}
+                          </SelectItem>
+                          <SelectItem value={BOOKING_STATUSES.WAITING_FOR_PAYMENT}>
+                            {BOOKING_STATUSES.WAITING_FOR_PAYMENT}
+                          </SelectItem>
+                          <SelectItem value={BOOKING_STATUSES.PAID}>
+                            {BOOKING_STATUSES.PAID}
+                          </SelectItem>
+                          <SelectItem value={BOOKING_STATUSES.CANCELLED}>
+                            {BOOKING_STATUSES.CANCELLED}
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </TableCell>

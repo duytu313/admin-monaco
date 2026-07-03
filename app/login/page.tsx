@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import Image from 'next/image';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -43,11 +44,23 @@ export default function LoginPage() {
   return (
     <div className="flex items-center justify-center min-h-screen bg-slate-950 p-4">
       <Card className="w-full max-w-md bg-slate-900 border-slate-800 text-slate-100 shadow-2xl">
-        <CardHeader className="space-y-2 text-center pb-6">
-          <CardTitle className="text-3xl font-bold tracking-tight">Đăng nhập</CardTitle>
-          <CardDescription className="text-slate-400">
-            Nhập email và mật khẩu để truy cập bảng điều khiển
-          </CardDescription>
+        <CardHeader className="space-y-4 text-center pb-6">
+          <div className="flex justify-center">
+            <Image 
+              src="/images/logo.png" 
+              alt="Logo" 
+              width={80}
+              height={80}
+              priority
+              className="w-auto h-auto"
+            />
+          </div>
+          <div className="space-y-2">
+            <CardTitle className="text-3xl font-bold tracking-tight">Đăng nhập</CardTitle>
+            <CardDescription className="text-slate-400">
+              Nhập email và mật khẩu để truy cập bảng điều khiển
+            </CardDescription>
+          </div>
         </CardHeader>
         <form onSubmit={handleLogin}>
           <CardContent className="space-y-4">

@@ -43,7 +43,7 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50">
       <Sidebar />
-      <main className="md:pl-64 p-4 md:p-8">
+      <main className="md:pl-72 p-4 md:p-12">
         <div className="max-w-7xl mx-auto">
           {children}
         </div>

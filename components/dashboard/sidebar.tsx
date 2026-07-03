@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { auth } from '@/lib/firebase-config';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 
 const navItems = [
   {
@@ -74,7 +75,17 @@ export function Sidebar() {
           isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         )}
       >
-        <h1 className="text-2xl font-bold text-white">Giao diện Quản trị</h1>
+        <div className="flex items-center gap-2 min-w-0">
+          <Image 
+            src="/images/logo.png" 
+            alt="Logo" 
+            width={40}
+            height={40}
+            priority
+            className="flex-shrink-0 w-10 h-10"
+          />
+          <span className="text-base font-bold text-white truncate">Admin</span>
+        </div>
 
         <nav className="flex flex-col gap-4">
           {navItems.map((item) => {
