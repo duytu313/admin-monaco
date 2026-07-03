@@ -15,7 +15,10 @@ import { db } from '@/lib/firebase-config';
 import { ref, onValue, update } from 'firebase/database';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { CalendarIcon, BarChart3, Mic, Heart, Soup } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { CalendarIcon, Mic, Heart, Soup } from 'lucide-react';
 import {
   BOOKING_STATUSES,
   ALL_BOOKING_STATUSES,
@@ -46,6 +49,10 @@ const getServiceColor = (type: string) => {
 export default function BookingsPage() {
   const [bookingList, setBookingList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState<any>(null);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentError, setPaymentError] = useState('');
 
   // Date range filter
   const [startDate, setStartDate] = useState(() => {
@@ -122,9 +129,54 @@ export default function BookingsPage() {
     return () => unsubBookings();
   }, []);
 
+  const handleClosePaymentDialog = () => {
+    setPaymentDialogOpen(false);
+    setSelectedBooking(null);
+    setPaymentAmount('');
+    setPaymentError('');
+  };
+
+  const handleOpenPayment = (booking: any) => {
+    setSelectedBooking(booking);
+    setPaymentAmount(String(booking.totalEst ?? booking.totalAmount ?? ''));
+    setPaymentError('');
+    setPaymentDialogOpen(true);
+  };
+
   const handleStatusChange = (bookingId: string, newStatus: string) => {
+    const booking = bookingList.find((b) => b.id === bookingId);
+    if (!booking) return;
+
+    if (newStatus === BOOKING_STATUSES.PAID) {
+      handleOpenPayment(booking);
+      return;
+    }
+
     const bookingRef = ref(db, `bookings/${bookingId}`);
     update(bookingRef, { status: newStatus });
+  };
+
+  const handleConfirmPayment = async () => {
+    if (!selectedBooking) return;
+    const amount = Number(paymentAmount.toString().replace(/[^0-9]/g, ''));
+    if (isNaN(amount) || amount <= 0) {
+      setPaymentError('Vui lòng nhập số tiền thanh toán hợp lệ.');
+      return;
+    }
+
+    try {
+      const bookingRef = ref(db, `bookings/${selectedBooking.id}`);
+      await update(bookingRef, {
+        status: BOOKING_STATUSES.PAID,
+        totalEst: amount,
+      });
+      setPaymentDialogOpen(false);
+      setSelectedBooking(null);
+      setPaymentAmount('');
+    } catch (error) {
+      console.error('Lỗi cập nhật thanh toán:', error);
+      setPaymentError('Không thể cập nhật thanh toán. Vui lòng thử lại.');
+    }
   };
 
   return (
@@ -237,7 +289,7 @@ export default function BookingsPage() {
                     <TableCell className="text-slate-300">{booking.bookingTime}</TableCell>
                     <TableCell>
                       <Select
-                        defaultValue={normalizeBookingStatus(booking.status)}
+                        value={normalizeBookingStatus(booking.status)}
                         onValueChange={(val) => handleStatusChange(booking.id, val)}
                       >
                         <SelectTrigger
@@ -290,6 +342,42 @@ export default function BookingsPage() {
           </Table>
         </div>
       </Card>
+
+      {/* Payment Dialog */}
+      <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700">
+          <DialogHeader>
+            <DialogTitle className="text-white">Xác nhận thanh toán</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Nhập số tiền khách hàng đã thanh toán cho đơn đặt phòng này.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="payment-amount" className="text-slate-300">Số tiền thanh toán (VNĐ)</Label>
+              <Input
+                id="payment-amount"
+                type="text"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                placeholder="Nhập số tiền..."
+                className="bg-slate-900 border-slate-700 text-white"
+              />
+              {paymentError && (
+                <p className="text-red-400 text-sm">{paymentError}</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleClosePaymentDialog} className="border-slate-600 text-slate-300 hover:bg-slate-700">
+              Hủy
+            </Button>
+            <Button onClick={handleConfirmPayment} className="bg-green-600 hover:bg-green-700 text-white">
+              Xác nhận thanh toán
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

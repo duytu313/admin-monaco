@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase-config';
+import { getUserRole } from '@/lib/auth';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,14 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const setAdminCookie = () => {
+    document.cookie = 'adminRole=admin; path=/; max-age=86400; sameSite=lax';
+  };
+
+  const clearAdminCookie = () => {
+    document.cookie = 'adminRole=; path=/; max-age=0; sameSite=lax';
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -24,6 +33,17 @@ export default function LoginPage() {
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      const user = auth.currentUser;
+      const role = user ? await getUserRole(user.uid) : null;
+
+      if (role !== 'admin') {
+        clearAdminCookie();
+        await signOut(auth);
+        setError('Quyền truy cập bị từ chối. Chỉ admin mới được phép vào.');
+        return;
+      }
+
+      setAdminCookie();
       router.push('/dashboard');
     } catch (err: any) {
       console.error(err);

@@ -54,6 +54,7 @@ export function Sidebar() {
   const router = useRouter();
 
   const handleLogout = async () => {
+    document.cookie = 'adminRole=; path=/; max-age=0; sameSite=lax';
     await signOut(auth);
     router.push('/login');
   };

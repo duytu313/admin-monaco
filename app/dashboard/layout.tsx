@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase-config';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/dashboard/sidebar';
 import { Toaster } from '@/components/ui/sonner';
+import { getUserRole } from '@/lib/auth';
 
 export default function DashboardLayout({
   children,
@@ -18,13 +19,27 @@ export default function DashboardLayout({
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
+      void (async () => {
+        if (!user) {
+          setIsAuthenticated(false);
+          setIsLoading(false);
+          router.replace('/login');
+          return;
+        }
+
+        const role = await getUserRole(user.uid);
+        if (role !== 'admin') {
+          document.cookie = 'adminRole=; path=/; max-age=0; sameSite=lax';
+          await signOut(auth);
+          setIsAuthenticated(false);
+          setIsLoading(false);
+          router.replace('/login');
+          return;
+        }
+
         setIsAuthenticated(true);
-      } else {
-        setIsAuthenticated(false);
-        router.push('/login');
-      }
-      setIsLoading(false);
+        setIsLoading(false);
+      })();
     });
 
     return () => unsubscribe();
