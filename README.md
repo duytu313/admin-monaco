@@ -42,6 +42,7 @@ A comprehensive admin dashboard built with **Next.js 16**, **React 19**, **Fireb
 │   └── use-toast.ts
 ├── lib/
 │   ├── firebase-config.ts      # Firebase client config (reads env vars)
+│   ├── firebase-admin.ts       # Firebase Admin SDK initialization
 │   └── utils.ts                # Utility functions (cn, etc.)
 ├── public/                     # Static assets (images, icons)
 ├── styles/                     # Additional styles
@@ -49,6 +50,7 @@ A comprehensive admin dashboard built with **Next.js 16**, **React 19**, **Fireb
 ├── .gitignore                  # Ignored files (secrets, logs, builds)
 ├── next.config.mjs             # Next.js configuration
 ├── package.json                # Dependencies & scripts
+├── package-lock.json           # npm lockfile
 ├── tsconfig.json               # TypeScript configuration
 └── postcss.config.mjs          # PostCSS configuration
 ```
@@ -56,7 +58,7 @@ A comprehensive admin dashboard built with **Next.js 16**, **React 19**, **Fireb
 ## ⚙️ Prerequisites
 
 - **Node.js** >= 18.x
-- **npm**, **yarn**, or **pnpm** (recommended)
+- **npm** (package manager)
 - A **Firebase project** with:
   - **Authentication** (Email/Password provider enabled)
   - **Realtime Database** (created and rules configured)
@@ -67,9 +69,7 @@ A comprehensive admin dashboard built with **Next.js 16**, **React 19**, **Fireb
 
 ```bash
 cd admin-dashboard-with-next-js
-pnpm install
-# or: npm install
-# or: yarn install
+npm install
 ```
 
 ### 2. Configure Environment Variables
@@ -107,9 +107,7 @@ This will grant the user the `admin` role in the Realtime Database.
 ### 5. Run the Development Server
 
 ```bash
-pnpm dev
-# or: npm run dev
-# or: yarn dev
+npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) to access the application.
@@ -119,8 +117,8 @@ Open [http://localhost:3000](http://localhost:3000) to access the application.
 ## 📦 Build for Production
 
 ```bash
-pnpm build
-pnpm start
+npm run build
+npm start
 ```
 
 ## 🔒 Security Best Practices
@@ -153,10 +151,10 @@ This project follows security best practices:
 ## 🔑 Key Scripts
 
 ```bash
-pnpm dev       # Start development server
-pnpm build     # Build for production
-pnpm start     # Start production server
-pnpm lint      # Run ESLint
+npm run dev       # Start development server
+npm run build     # Build for production
+npm start         # Start production server
+npm run lint      # Run ESLint
 ```
 
 ## 🤝 Contributing
@@ -170,3 +168,11 @@ pnpm lint      # Run ESLint
 ## 📄 License
 
 This project is private and proprietary. All rights reserved.
+
+## 📝 Notes
+
+- This project uses **npm** as the package manager (migrated from pnpm).
+- The `package-lock.json` file ensures consistent dependency versions across environments.
+- Firebase Admin SDK is initialized in `lib/firebase-admin.ts` for server-side operations.
+- All dashboard pages are protected and require authentication.
+- The application uses Next.js 16 with the App Router architecture.
